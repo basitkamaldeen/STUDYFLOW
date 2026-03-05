@@ -1,0 +1,27 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Prisma schema for StudyFlow
+// This schema has a notes table to store user-generated notes,
+// including text content and optional original input.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Note {
+  id          String   @id @default(cuid())
+  type        String   // 'ocr' | 'summary' | 'quiz' | 'flashcard'
+  title       String
+  content     String   // The processed content (summary, quiz JSON, etc.)
+  originalText String? // The original input text/image
+  userId      String? // Optional: associated user
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("notes")
+}

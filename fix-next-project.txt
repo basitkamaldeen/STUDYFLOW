@@ -1,0 +1,5 @@
+Step 1: Scan /app for TS, ESLint, import errors; fix paths; create minimal stubs
+Step 2: Verify tsconfig path aliases
+Step 3: Ensure Server vs Client components rules
+Step 4: Upgrade UI using Tailwind CSS best practices
+Step 5: Build and summarize modified/created files
