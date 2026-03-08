@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Card from "../components/Card";
 import { Button } from "../components/ui/button";
 import PageHeader from "../components/PageHeader";
+import { performOCR } from "../../lib/ocr-client";
 
 interface ExtractedTextProps {
   text: string;
@@ -60,6 +61,7 @@ export default function OCRPage() {
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -70,6 +72,7 @@ export default function OCRPage() {
     if (!file) return;
 
     setIsLoading(true);
+    setError(null);
     const reader = new FileReader();
     
     reader.onload = async (e) => {
@@ -77,23 +80,19 @@ export default function OCRPage() {
       setUploadedImage(imageUrl);
       
       try {
-        const formData = new FormData();
-        formData.append('image', file);
+        console.log("Starting OCR processing...");
+        // ✅ Use client-side OCR
+        const text = await performOCR(file);
         
-        const response = await fetch('/api/ocr', {
-          method: 'POST',
-          body: formData,
-        });
-        
-        const data = await response.json();
-        if (data.text) {
-          setExtractedText(data.text);
+        if (text && text.trim().length > 0) {
+          setExtractedText(text);
         } else {
-          setExtractedText("No text could be extracted from this image.");
+          setExtractedText("No text could be extracted from this image. Please try a clearer image.");
         }
-      } catch (error) {
-        console.error('OCR Error:', error);
-        setExtractedText("Error processing image. Please try again.");
+      } catch (err) {
+        console.error("OCR Error:", err);
+        setError(err instanceof Error ? err.message : "Error processing image");
+        setExtractedText("Error processing image. Please try again with a clearer image.");
       } finally {
         setIsLoading(false);
       }
@@ -110,7 +109,7 @@ export default function OCRPage() {
     const imageFile = files.find(file => file.type.startsWith('image/'));
     
     if (imageFile) {
-      processImage(imageFile);
+      processImage(imageFile as File);
     }
   }, []);
 
@@ -158,7 +157,7 @@ export default function OCRPage() {
       
       stream.getTracks().forEach(track => track.stop());
     } catch (error) {
-      alert('Camera access denied or not available. Please use file upload instead.');
+      setError('Camera access denied or not available. Please use file upload instead.');
     }
   };
 
@@ -175,6 +174,7 @@ export default function OCRPage() {
   const resetUpload = () => {
     setExtractedText("");
     setUploadedImage(null);
+    setError(null);
   };
 
   return (
@@ -231,11 +231,18 @@ export default function OCRPage() {
               </Button>
             )}
 
+            {/* Error Message */}
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                {error}
+              </div>
+            )}
+
             {/* Loading State */}
             {isLoading && (
               <div className="flex items-center justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                <span className="ml-3 text-gray-600">Processing image...</span>
+                <span className="ml-3 text-gray-600">Processing image (this may take up to 2 minutes)...</span>
               </div>
             )}
 
