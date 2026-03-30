@@ -59,3 +59,14 @@ export async function deleteWithAuth(url: string) {
   }
   return response.json();
 }
+/**
+ * PUT request with authentication
+ */
+export async function putWithAuth(url: string, data: any) {
+  const response = await fetchWithAuth(url, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+  return response.json();
+}
