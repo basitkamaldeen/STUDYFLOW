@@ -1,8 +1,59 @@
-node_modules/
-.next/
-node_modules/
-.next/
-.env
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
 
-# clerk configuration (can include secrets)
-/.clerk/
+# Testing
+/coverage
+
+# Next.js
+/.next/
+/out/
+
+# Production
+/build
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local env files
+.env
+.env*.local
+.env*.production
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Prisma
+dev.db
+dev.db-journal
+prisma/dev.db
+prisma/dev.db-journal
+
+# Backup files
+*.backup
+*.backup2
+*~
+
+# Temporary files
+New Text Document*.txt
+*.tmp
+*.temp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
