@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
-import type { NotesListResponse, NoteCreateResponse, NoteCreateRequest, APIErrorResponse, Note } from "@/types/api";
+import { prisma } from "../../../lib/prisma";
+import { getCurrentUser } from "../../../lib/auth";
+import type { NotesListResponse, NoteCreateResponse, NoteCreateRequest, APIErrorResponse, Note } from "../../../types/api";
 
 // Constants
 const MAX_CONTENT_LENGTH = 100000; // 100KB
@@ -16,10 +16,10 @@ export async function GET(req: NextRequest): Promise<NextResponse<NotesListRespo
   console.log(`[Notes-GET-${requestId}] Fetching notes`);
 
   try {
-    // Get authenticated user ID
+    // Authenticate user - PASS THE REQUEST to getCurrentUser
     let userId: string;
     try {
-      userId = requireAuth(req);
+      userId = getCurrentUser(req);
       console.log(`[Notes-GET-${requestId}] Authenticated user: ${userId}`);
     } catch (authError) {
       console.warn(`[Notes-GET-${requestId}] Authentication failed`);
@@ -70,10 +70,10 @@ export async function POST(req: NextRequest): Promise<NextResponse<NoteCreateRes
   console.log(`[Notes-POST-${requestId}] Creating new note`);
 
   try {
-    // Get authenticated user ID
+    // Authenticate user - PASS THE REQUEST to getCurrentUser
     let userId: string;
     try {
-      userId = requireAuth(req);
+      userId = getCurrentUser(req);
       console.log(`[Notes-POST-${requestId}] Authenticated user: ${userId}`);
     } catch (authError) {
       console.warn(`[Notes-POST-${requestId}] Authentication failed`);

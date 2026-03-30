@@ -1,0 +1,374 @@
+import { NextResponse } from "next/server";
+import { HfInference } from "@huggingface/inference";
+import type { FlashcardsResponse, FlashcardsRequest, Flashcard, APIErrorResponse } from "../../../types/api";
+
+export const runtime = "nodejs";
+
+// Model and configuration
+const MODEL = "meta-llama/Llama-3.2-1B-Instruct";
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
+const AI_TIMEOUT_MS = 45000;
+const MAX_TEXT_LENGTH = 3000;
+const MIN_TEXT_LENGTH = 50;
+const MAX_CARDS = 20;
+const MIN_CARDS = 1;
+
+// Simple in-memory rate limiting (per IP)
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 10;
+
+/**
+ * Production-grade Flashcards API Route
+ * Generates AI-powered flashcards using google/flan-t5-base with retry logic
+ */
+export async function POST(req: Request): Promise<NextResponse<FlashcardsResponse | APIErrorResponse>> {
+  const requestId = crypto.randomUUID();
+  console.log(`[Flashcards-${requestId}] Starting flashcard generation`);
+
+  try {
+    // Rate limiting check
+    const clientIp = req.headers.get('x-forwarded-for') || 'unknown';
+    const rateLimitResult = checkRateLimit(clientIp);
+    if (!rateLimitResult.allowed) {
+      console.warn(`[Flashcards-${requestId}] Rate limit exceeded for IP: ${clientIp}`);
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Rate limit exceeded", 
+        details: `Too many requests. Please try again in ${Math.ceil(rateLimitResult.retryAfter / 1000)} seconds`,
+        code: "RATE_LIMIT_EXCEEDED"
+      }, { status: 429 });
+    }
+
+    // Parse and validate request body
+    let payload: unknown;
+    try {
+      payload = await req.json();
+    } catch (parseError) {
+      console.warn(`[Flashcards-${requestId}] Invalid JSON in request body`);
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Invalid request body", 
+        details: "Request body must be valid JSON",
+        code: "INVALID_JSON"
+      }, { status: 400 });
+    }
+
+    // Type guard and validation
+    if (!isFlashcardsRequest(payload)) {
+      console.warn(`[Flashcards-${requestId}] Invalid request payload`);
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Invalid request", 
+        details: `Request must include 'text' field with at least ${MIN_TEXT_LENGTH} characters`,
+        code: "INVALID_REQUEST"
+      }, { status: 400 });
+    }
+
+    const { text, count = 10 } = payload;
+
+    // Validate text length
+    if (text.trim().length < MIN_TEXT_LENGTH) {
+      console.warn(`[Flashcards-${requestId}] Text too short: ${text.trim().length} chars`);
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Text too short", 
+        details: `Please provide at least ${MIN_TEXT_LENGTH} characters of text to generate meaningful flashcards`,
+        code: "TEXT_TOO_SHORT"
+      }, { status: 400 });
+    }
+
+    // Validate card count
+    if (count < MIN_CARDS || count > MAX_CARDS) {
+      console.warn(`[Flashcards-${requestId}] Invalid card count: ${count}`);
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Invalid card count", 
+        details: `Card count must be between ${MIN_CARDS} and ${MAX_CARDS}`,
+        code: "INVALID_COUNT"
+      }, { status: 400 });
+    }
+
+    // Check API key
+    const apiKey = process.env.HUGGINGFACE_API_KEY;
+    if (!apiKey) {
+      console.error(`[Flashcards-${requestId}] Missing HUGGINGFACE_API_KEY`);
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Service configuration error", 
+        details: "AI service is not properly configured",
+        code: "CONFIGURATION_ERROR"
+      }, { status: 500 });
+    }
+
+    const hf = new HfInference(apiKey);
+
+    // Generate flashcards with retry logic
+    let cards: Flashcard[] | null = null;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      console.log(`[Flashcards-${requestId}] Attempt ${attempt}/${MAX_RETRIES}`);
+      
+      try {
+        // Create timeout promise
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("AI_TIMEOUT")), AI_TIMEOUT_MS)
+        );
+
+        // Generate flashcards
+        const aiPromise = generateFlashcardsWithAI(hf, text, count);
+        cards = await Promise.race([aiPromise, timeoutPromise]);
+        
+        // Validate cards structure
+        if (!Array.isArray(cards) || cards.length === 0) {
+          throw new Error("AI returned empty or invalid card array");
+        }
+
+        console.log(`[Flashcards-${requestId}] Successfully generated ${cards.length} cards on attempt ${attempt}`);
+        break; // Success - exit retry loop
+        
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        console.error(`[Flashcards-${requestId}] Attempt ${attempt} failed:`, lastError.message);
+        
+        if (attempt < MAX_RETRIES) {
+          console.log(`[Flashcards-${requestId}] Retrying in ${RETRY_DELAY_MS * attempt}ms...`);
+          await sleep(RETRY_DELAY_MS * attempt);
+        }
+      }
+    }
+
+    // If all retries failed, use fallback
+    if (!cards || cards.length === 0) {
+      console.warn(`[Flashcards-${requestId}] All AI attempts failed, using fallback generation`);
+      cards = generateFlashcardsFallback(text, count);
+    }
+
+    // Success response
+    return NextResponse.json<FlashcardsResponse>({ 
+      cards: cards.slice(0, count),
+      metadata: {
+        requestedCount: count,
+        actualCount: cards.length,
+        source: cards.length > 0 ? "AI-generated" : "Rule-based fallback"
+      }
+    });
+
+  } catch (error) {
+    console.error(`[Flashcards-${requestId}] Unexpected error:`, error);
+    return NextResponse.json<APIErrorResponse>({ 
+      error: "Internal server error", 
+      details: error instanceof Error ? error.message : "An unexpected error occurred",
+      code: "INTERNAL_ERROR"
+    }, { status: 500 });
+  }
+}
+
+/**
+ * Type guard for FlashcardsRequest
+ */
+function isFlashcardsRequest(payload: unknown): payload is FlashcardsRequest {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const p = payload as Record<string, unknown>;
+  
+  const hasValidText = typeof p.text === 'string' && p.text.trim().length >= MIN_TEXT_LENGTH;
+  const hasValidCount = p.count === undefined || (typeof p.count === 'number' && p.count >= MIN_CARDS && p.count <= MAX_CARDS);
+  
+  return hasValidText && hasValidCount;
+}
+
+/**
+ * Check rate limit for client
+ */
+function checkRateLimit(clientIp: string): { allowed: boolean; retryAfter: number } {
+  const now = Date.now();
+  const clientData = rateLimitMap.get(clientIp);
+
+  if (!clientData || now > clientData.resetTime) {
+    // New window
+    rateLimitMap.set(clientIp, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true, retryAfter: 0 };
+  }
+
+  if (clientData.count >= RATE_LIMIT_MAX_REQUESTS) {
+    // Rate limit exceeded
+    return { allowed: false, retryAfter: clientData.resetTime - now };
+  }
+
+  // Increment counter
+  clientData.count++;
+  return { allowed: true, retryAfter: 0 };
+}
+
+/**
+ * Generate flashcards using HuggingFace Inference API
+ */
+async function generateFlashcardsWithAI(hf: HfInference, text: string, count: number): Promise<Flashcard[]> {
+  const truncatedText = text.length > MAX_TEXT_LENGTH 
+    ? text.substring(0, MAX_TEXT_LENGTH) + "..." 
+    : text;
+
+  const prompt = `Generate ${count} flashcards from this educational text. Create question-answer pairs that test understanding of key concepts.
+
+Text: "${truncatedText}"
+
+Return ONLY a JSON array with this exact format:
+[
+  {
+    "front": "What is the main function of photosynthesis?",
+    "back": "Photosynthesis converts light energy into chemical energy, producing glucose and oxygen from water and carbon dioxide."
+  }
+]
+
+Focus on:
+- Key definitions and concepts
+- Important processes and mechanisms
+- Cause and effect relationships
+- Compare and contrast scenarios`;
+
+  console.log(`[Flashcards] Calling HuggingFace API with model: ${MODEL}`);
+  console.log(`[Flashcards] Generating ${count} cards`);
+
+  const response = await hf.textGeneration({
+    model: MODEL,
+    inputs: prompt,
+    parameters: {
+      max_new_tokens: 1024,
+      temperature: 0.8,
+      return_full_text: false
+    }
+  });
+
+  const generatedText = (response as any).generated_text;
+  if (!generatedText || typeof generatedText !== 'string') {
+    throw new Error("AI returned empty or invalid response");
+  }
+
+  // Parse JSON from response
+  const jsonMatch = generatedText.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    throw new Error("Could not parse AI response as JSON");
+  }
+
+  try {
+    const cards = JSON.parse(jsonMatch[0]) as Flashcard[];
+    
+    // Validate each card
+    if (!Array.isArray(cards)) {
+      throw new Error("AI response is not an array");
+    }
+
+    for (const card of cards) {
+      if (!card.front || !card.back) {
+        throw new Error("Invalid card structure in AI response");
+      }
+    }
+
+    console.log(`[Flashcards] Successfully parsed ${cards.length} cards`);
+    return cards;
+  } catch (parseError) {
+    console.error("[Flashcards] JSON parse error:", parseError);
+    throw new Error("Failed to parse AI response");
+  }
+}
+
+/**
+ * Fallback flashcard generation when AI fails
+ */
+function generateFlashcardsFallback(text: string, count: number): Flashcard[] {
+  console.log("[Flashcards] Using fallback generation");
+  
+  const sentences = text
+    .split(/[.!?]+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 20 && s.length < 200);
+
+  const flashcards: Flashcard[] = [];
+  const concepts = extractKeyConcepts(text);
+
+  for (let i = 0; i < Math.min(count, Math.max(concepts.length, sentences.length / 2)); i++) {
+    let card: Flashcard;
+
+    if (concepts[i]) {
+      // Create definition card
+      card = {
+        front: `What is ${concepts[i].term}?`,
+        back: concepts[i].definition || `This refers to ${concepts[i].term} as mentioned in the text.`
+      };
+    } else {
+      // Create question from sentence
+      const sentence = sentences[i % sentences.length];
+      const words = sentence.split(/\s+/);
+      const keyWords = words.filter(w => w.length > 4 && !isCommonWord(w)).slice(0, 2);
+
+      if (keyWords.length > 0) {
+        card = {
+          front: `What does the text say about ${keyWords.join(' and ')}?`,
+          back: sentence.trim()
+        };
+      } else {
+        card = {
+          front: "What is the main idea in this statement?",
+          back: sentence.trim()
+        };
+      }
+    }
+
+    flashcards.push(card);
+  }
+
+  return flashcards;
+}
+
+/**
+ * Extract key concepts from text for fallback generation
+ */
+function extractKeyConcepts(text: string): { term: string; definition: string }[] {
+  const concepts: { term: string; definition: string }[] = [];
+  const sentences = text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+
+  // Look for definition patterns
+  const definitionPatterns = [
+    /(\w+(?:\s+\w+)?)\s+(?:is|are|refers to|can be defined as)\s+([^,.!?]+)/i,
+    /([^,.!?]+)\s+(?:means|represents)\s+([^,.!?]+)/i
+  ];
+
+  sentences.forEach(sentence => {
+    for (const pattern of definitionPatterns) {
+      const match = sentence.match(pattern);
+      if (match && match[1] && match[2]) {
+        concepts.push({ term: match[1].trim(), definition: match[2].trim() });
+        break;
+      }
+    }
+  });
+
+  if (concepts.length === 0) {
+    const capitalizedWords = text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || [];
+    capitalizedWords.slice(0, 5).forEach(term => {
+      const context = text.split(term)[1]?.split('.')[0];
+      if (context && context.length > 10) {
+        concepts.push({ term, definition: context.trim() });
+      }
+    });
+  }
+
+  return concepts.slice(0, 10);
+}
+
+/**
+ * Check if word is common (for fallback generation)
+ */
+function isCommonWord(word: string): boolean {
+  const commonWords = [
+    'the', 'and', 'that', 'have', 'for', 'not', 'with', 'you', 'this', 'but', 
+    'his', 'from', 'they', 'she', 'been', 'than', 'its', 'were', 'said', 'each',
+    'which', 'their', 'time', 'will', 'would', 'about', 'after', 'should', 'could',
+    'what', 'when', 'where', 'why', 'how', 'can', 'may', 'might', 'shall',
+    'also', 'into', 'over', 'more', 'most', 'some', 'such', 'only', 'very', 'even'
+  ];
+  return commonWords.includes(word.toLowerCase());
+}
+
+/**
+ * Sleep utility for retry delays
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}

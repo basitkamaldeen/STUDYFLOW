@@ -1,13 +1,7 @@
-"use client";
-
 import Card from "./components/Card";
 import Link from "next/link";
-import { useAuth } from "../context/AuthContext";
-import { Button } from "./components/ui/button";
 
 export default function HomePage() {
-  const { user, isLoading } = useAuth();
-
   return (
     <div className="space-y-12">
       {/* Hero Section */}
@@ -15,52 +9,16 @@ export default function HomePage() {
         <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
           Welcome to StudyFlow
         </h1>
-        
-        {/* Personalized Greeting */}
-        {!isLoading && user && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md mx-auto">
-            <p className="text-blue-800">
-              👋 Welcome back, <span className="font-semibold">{user.username}</span>!
-            </p>
-          </div>
-        )}
-        
         <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
           Transform your learning experience with AI-powered tools that convert notes, images, and audio into intelligent summaries and interactive quizzes.
         </p>
-        
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          {!isLoading && !user ? (
-            <>
-              <Link 
-                href="/signup" 
-                className="inline-flex items-center justify-center rounded-xl px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
-              >
-                Get Started Free
-              </Link>
-              <Link 
-                href="/login" 
-                className="inline-flex items-center justify-center rounded-xl px-8 py-4 border-2 border-gray-300 text-gray-700 font-semibold hover:border-indigo-500 hover:text-indigo-600 transform hover:scale-105 transition-all duration-200"
-              >
-                Sign In
-              </Link>
-            </>
-          ) : !isLoading && user && (
-            <>
-              <Link 
-                href="/notes" 
-                className="inline-flex items-center justify-center rounded-xl px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
-              >
-                Go to My Notes
-              </Link>
-              <Link 
-                href="/summarize" 
-                className="inline-flex items-center justify-center rounded-xl px-8 py-4 border-2 border-gray-300 text-gray-700 font-semibold hover:border-indigo-500 hover:text-indigo-600 transform hover:scale-105 transition-all duration-200"
-              >
-                Try AI Summary
-              </Link>
-            </>
-          )}
+          <Link 
+            href="/dashboard" 
+            className="inline-flex items-center justify-center rounded-xl px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
+          >
+            Get Started
+          </Link>
           <Link 
             href="/ocr" 
             className="inline-flex items-center justify-center rounded-xl px-8 py-4 border-2 border-gray-300 text-gray-700 font-semibold hover:border-indigo-500 hover:text-indigo-600 transform hover:scale-105 transition-all duration-200"
@@ -73,7 +31,7 @@ export default function HomePage() {
       {/* Features Grid */}
       <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-4">
         <Link href="/ocr">
-          <Card title="Image to Text" className="hover:shadow-lg transition-all cursor-pointer h-full">
+          <Card title="Image to Text">
             <div className="space-y-4">
               <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,7 +44,7 @@ export default function HomePage() {
         </Link>
 
         <Link href="/speech">
-          <Card title="Speech to Text" className="hover:shadow-lg transition-all cursor-pointer h-full">
+          <Card title="Speech to Text">
             <div className="space-y-4">
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -99,7 +57,7 @@ export default function HomePage() {
         </Link>
 
         <Link href="/summarize">
-          <Card title="AI Summaries" className="hover:shadow-lg transition-all cursor-pointer h-full">
+          <Card title="AI Summaries">
             <div className="space-y-4">
               <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -112,7 +70,7 @@ export default function HomePage() {
         </Link>
 
         <Link href="/quiz">
-          <Card title="Smart Quizzes" className="hover:shadow-lg transition-all cursor-pointer h-full">
+          <Card title="Smart Quizzes">
             <div className="space-y-4">
               <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-red-600 rounded-xl flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

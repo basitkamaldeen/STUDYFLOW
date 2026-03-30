@@ -3,3 +3,6 @@ node_modules/
 node_modules/
 .next/
 .env
+
+# clerk configuration (can include secrets)
+/.clerk/

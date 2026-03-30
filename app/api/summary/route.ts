@@ -140,53 +140,33 @@ function isSummaryRequest(payload: unknown): payload is SummaryRequest {
 }
 
 /**
- * Generate summary using HuggingFace Inference API
+ * Generate summary using Hugging Face API
  */
 async function generateSummaryWithAI(hf: HfInference, text: string, length: string): Promise<string> {
-  // Truncate text if too long
   const truncatedText = text.length > MAX_TEXT_LENGTH 
     ? text.substring(0, MAX_TEXT_LENGTH) + "..." 
     : text;
 
-  // Build prompt based on length preference
-  let lengthInstruction: string;
-  switch (length) {
-    case "short":
-      lengthInstruction = "Write a brief summary in 2-3 sentences.";
-      break;
-    case "detailed":
-      lengthInstruction = "Write a comprehensive summary with multiple paragraphs.";
-      break;
-    default:
-      lengthInstruction = "Write a standard summary in 5-7 sentences.";
-  }
-
-  const prompt = `${lengthInstruction} Summarize the following text:
-
-Text: "${truncatedText}"
-
-Provide a clear, concise summary that captures the main points.`;
-
   console.log(`[Summary] Calling HuggingFace API with model: ${MODEL}`);
-  console.log(`[Summary] Prompt length: ${prompt.length} characters`);
 
-  const response = await hf.textGeneration({
+  // Using summarization task (correct for facebook/bart-large-cnn)
+  const response = await hf.summarization({
     model: MODEL,
-    inputs: prompt,
+    inputs: text.length > 1024 ? text.substring(0, 1024) : text,
     parameters: {
-      max_new_tokens: 512,
-      temperature: 0.7,
-      return_full_text: false
+      max_length: length === 'short' ? 50 : length === 'medium' ? 150 : 300,
+      min_length: length === 'short' ? 20 : length === 'medium' ? 50 : 100,
     }
   });
 
-  const generatedText = (response as any).generated_text;
-  if (!generatedText || typeof generatedText !== 'string') {
+  const summary = typeof response === 'string' ? response : (response as any).summary_text;
+  
+  if (!summary || typeof summary !== 'string') {
     throw new Error("AI returned empty or invalid response");
   }
 
-  console.log(`[Summary] Generated ${generatedText.length} characters`);
-  return generatedText.trim();
+  console.log(`[Summary] Generated ${summary.length} characters`);
+  return summary.trim();
 }
 
 /**

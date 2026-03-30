@@ -22,4 +22,8 @@ export async function performOCR(file: File): Promise<string> {
     console.error("OCR Error:", error);
     throw new Error(`OCR failed: ${error instanceof Error ? error.message : "Unknown error"}`);
   }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> bc0cf778 (Complete authentication system)

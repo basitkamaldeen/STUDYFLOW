@@ -6,14 +6,8 @@ import type { QuizResponse, QuizRequest, QuizQuestion, APIErrorResponse } from "
 
 export const runtime = "nodejs";
 
-// Use models that are available on free tier
-// Llama models require chatCompletion, not textGeneration
-const MODELS = [
-  "meta-llama/Llama-3.2-1B-Instruct",  // ✅ Works with chatCompletion
-  "mistralai/Mistral-7B-Instruct-v0.1", // ✅ Works with chatCompletion
-  "google/flan-t5-base",                // ✅ Works with textGeneration
-];
-
+// Model and configuration
+const MODEL = "meta-llama/Llama-3.2-1B-Instruct";
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1500;
 const AI_TIMEOUT_MS = 45000;
@@ -22,32 +16,38 @@ const MIN_TEXT_LENGTH = 60;
 const MAX_QUESTIONS = 20;
 const MIN_QUESTIONS = 1;
 
-// Rate limiting
+// Simple in-memory rate limiting (per IP)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT_WINDOW_MS = 60000;
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
 const RATE_LIMIT_MAX_REQUESTS = 10;
 
+/**
+ * Production-grade Quiz API Route
+ * Generates AI-powered quiz questions using google/flan-t5-base with retry logic
+ */
 export async function POST(req: Request): Promise<NextResponse<QuizResponse | APIErrorResponse>> {
   const requestId = crypto.randomUUID();
   console.log(`[Quiz-${requestId}] Starting quiz generation`);
 
   try {
-    // Rate limiting
+    // Rate limiting check
     const clientIp = req.headers.get('x-forwarded-for') || 'unknown';
     const rateLimitResult = checkRateLimit(clientIp);
     if (!rateLimitResult.allowed) {
+      console.warn(`[Quiz-${requestId}] Rate limit exceeded for IP: ${clientIp}`);
       return NextResponse.json<APIErrorResponse>({ 
         error: "Rate limit exceeded", 
-        details: `Too many requests. Try again in ${Math.ceil(rateLimitResult.retryAfter / 1000)} seconds`,
+        details: `Too many requests. Please try again in ${Math.ceil(rateLimitResult.retryAfter / 1000)} seconds`,
         code: "RATE_LIMIT_EXCEEDED"
       }, { status: 429 });
     }
 
-    // Parse request
+    // Parse and validate request body
     let payload: unknown;
     try {
       payload = await req.json();
     } catch (parseError) {
+      console.warn(`[Quiz-${requestId}] Invalid JSON in request body`);
       return NextResponse.json<APIErrorResponse>({ 
         error: "Invalid request body", 
         details: "Request body must be valid JSON",
@@ -55,7 +55,9 @@ export async function POST(req: Request): Promise<NextResponse<QuizResponse | AP
       }, { status: 400 });
     }
 
+    // Type guard and validation
     if (!isQuizRequest(payload)) {
+      console.warn(`[Quiz-${requestId}] Invalid request payload`);
       return NextResponse.json<APIErrorResponse>({ 
         error: "Invalid request", 
         details: `Request must include 'text' field with at least ${MIN_TEXT_LENGTH} characters`,
@@ -63,17 +65,26 @@ export async function POST(req: Request): Promise<NextResponse<QuizResponse | AP
       }, { status: 400 });
     }
 
-    const { text, difficulty = "medium", count = 5, saveToNotes = false } = payload;
+    const { 
+      text, 
+      difficulty = "medium", 
+      count = 5,
+      saveToNotes = false 
+    } = payload;
 
+    // Validate text length
     if (text.trim().length < MIN_TEXT_LENGTH) {
+      console.warn(`[Quiz-${requestId}] Text too short: ${text.trim().length} chars`);
       return NextResponse.json<APIErrorResponse>({ 
         error: "Text too short", 
-        details: `Please provide at least ${MIN_TEXT_LENGTH} characters`,
+        details: `Please provide at least ${MIN_TEXT_LENGTH} characters of text to generate meaningful quiz questions`,
         code: "TEXT_TOO_SHORT"
       }, { status: 400 });
     }
 
+    // Validate question count
     if (count < MIN_QUESTIONS || count > MAX_QUESTIONS) {
+      console.warn(`[Quiz-${requestId}] Invalid question count: ${count}`);
       return NextResponse.json<APIErrorResponse>({ 
         error: "Invalid question count", 
         details: `Question count must be between ${MIN_QUESTIONS} and ${MAX_QUESTIONS}`,
@@ -81,12 +92,13 @@ export async function POST(req: Request): Promise<NextResponse<QuizResponse | AP
       }, { status: 400 });
     }
 
+    // Check API key
     const apiKey = process.env.HUGGINGFACE_API_KEY;
     if (!apiKey) {
       console.error(`[Quiz-${requestId}] Missing HUGGINGFACE_API_KEY`);
       return NextResponse.json<APIErrorResponse>({ 
         error: "Service configuration error", 
-        details: "AI service is not properly configured. Please add HUGGINGFACE_API_KEY to your environment variables.",
+        details: "AI service is not properly configured",
         code: "CONFIGURATION_ERROR"
       }, { status: 500 });
     }
@@ -99,7 +111,7 @@ export async function POST(req: Request): Promise<NextResponse<QuizResponse | AP
       try {
         userId = getCurrentUser(req as any);
       } catch {
-        console.warn(`[Quiz-${requestId}] User not authenticated, skipping save`);
+        console.warn(`[Quiz-${requestId}] User not authenticated, skipping save to notes`);
       }
     }
 
@@ -111,38 +123,46 @@ export async function POST(req: Request): Promise<NextResponse<QuizResponse | AP
       console.log(`[Quiz-${requestId}] Attempt ${attempt}/${MAX_RETRIES}`);
       
       try {
+        // Create timeout promise
         const timeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("AI_TIMEOUT")), AI_TIMEOUT_MS)
         );
 
+        // Generate quiz
         const aiPromise = generateQuizWithAI(hf, text, difficulty, count);
         questions = await Promise.race([aiPromise, timeoutPromise]);
         
+        // Validate questions structure
         if (!Array.isArray(questions) || questions.length === 0) {
           throw new Error("AI returned empty or invalid question array");
         }
 
-        console.log(`[Quiz-${requestId}] Successfully generated ${questions.length} questions`);
-        break;
+        console.log(`[Quiz-${requestId}] Successfully generated ${questions.length} questions on attempt ${attempt}`);
+        break; // Success - exit retry loop
         
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         console.error(`[Quiz-${requestId}] Attempt ${attempt} failed:`, lastError.message);
         
         if (attempt < MAX_RETRIES) {
+          console.log(`[Quiz-${requestId}] Retrying in ${RETRY_DELAY_MS * attempt}ms...`);
           await sleep(RETRY_DELAY_MS * attempt);
         }
       }
     }
 
-    // Use fallback if AI failed
+    // If all retries failed
     if (!questions || questions.length === 0) {
-      console.log(`[Quiz-${requestId}] Using fallback generation`);
-      questions = generateFallbackQuiz(text, difficulty, count);
+      console.error(`[Quiz-${requestId}] All ${MAX_RETRIES} attempts failed`);
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "AI service unavailable", 
+        details: `Failed to generate quiz after ${MAX_RETRIES} attempts. ${lastError?.message || ""}`,
+        code: "AI_SERVICE_ERROR"
+      }, { status: 503 });
     }
 
-    // Save to notes if requested
-    if (saveToNotes && userId && questions) {
+    // Save to notes if requested and user is authenticated
+    if (saveToNotes && userId) {
       try {
         const titleWords = text.split(/\s+/).slice(0, 6);
         const finalTitle = `Quiz: ${titleWords.join(' ')}${titleWords.length < text.split(/\s+/).length ? '...' : ''}`;
@@ -156,19 +176,21 @@ export async function POST(req: Request): Promise<NextResponse<QuizResponse | AP
             title: finalTitle
           }
         });
-        console.log(`[Quiz-${requestId}] Saved quiz to notes`);
+        console.log(`[Quiz-${requestId}] Saved quiz to notes for user ${userId}`);
       } catch (noteErr) {
         console.error(`[Quiz-${requestId}] Failed to save to notes:`, noteErr);
+        // Don't fail the request if saving to notes fails
       }
     }
 
+    // Success response
     return NextResponse.json<QuizResponse>({
       questions: questions.slice(0, count),
       metadata: {
         difficulty,
         requestedCount: count,
         actualCount: questions.length,
-        source: questions.length === count ? "AI-generated" : "AI-generated with fallback"
+        source: "AI-generated"
       }
     });
 
@@ -182,6 +204,9 @@ export async function POST(req: Request): Promise<NextResponse<QuizResponse | AP
   }
 }
 
+/**
+ * Type guard for QuizRequest
+ */
 function isQuizRequest(payload: unknown): payload is QuizRequest {
   if (typeof payload !== 'object' || payload === null) return false;
   const p = payload as Record<string, unknown>;
@@ -193,153 +218,102 @@ function isQuizRequest(payload: unknown): payload is QuizRequest {
   return hasValidText && hasValidDifficulty && hasValidCount;
 }
 
+/**
+ * Check rate limit for client
+ */
 function checkRateLimit(clientIp: string): { allowed: boolean; retryAfter: number } {
   const now = Date.now();
   const clientData = rateLimitMap.get(clientIp);
 
   if (!clientData || now > clientData.resetTime) {
+    // New window
     rateLimitMap.set(clientIp, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
     return { allowed: true, retryAfter: 0 };
   }
 
   if (clientData.count >= RATE_LIMIT_MAX_REQUESTS) {
+    // Rate limit exceeded
     return { allowed: false, retryAfter: clientData.resetTime - now };
   }
 
+  // Increment counter
   clientData.count++;
   return { allowed: true, retryAfter: 0 };
 }
 
+/**
+ * Generate quiz using HuggingFace Inference API
+ */
 async function generateQuizWithAI(hf: HfInference, text: string, difficulty: string, count: number): Promise<QuizQuestion[]> {
   const truncatedText = text.length > MAX_TEXT_LENGTH 
     ? text.substring(0, MAX_TEXT_LENGTH) + "..." 
     : text;
 
-  const prompt = `Generate ${count} multiple-choice quiz questions about this text at ${difficulty} difficulty level.
+  const prompt = `Generate ${count} multiple-choice quiz questions from this text at ${difficulty} difficulty level.
 
 Text: "${truncatedText}"
 
 Return ONLY a JSON array with this exact format:
 [
   {
-    "question": "Question text",
+    "question": "What is the main concept discussed?",
     "options": ["Option A", "Option B", "Option C", "Option D"],
     "answer": 0,
-    "explanation": "Brief explanation"
+    "explanation": "Brief explanation why this is correct"
   }
-]`;
+]
 
-  let lastError: Error | null = null;
-  
-  // Try each model in sequence
-  for (const model of MODELS) {
-    try {
-      console.log(`[Quiz] Trying model: ${model}`);
-      
-      let response: any;
-      
-      // Check if it's a conversational model (Llama, Mistral) or text generation model (Flan)
-      if (model.includes("llama") || model.includes("mistral")) {
-        // Use chatCompletion for conversational models
-        response = await hf.chatCompletion({
-          model: model,
-          messages: [
-            {
-              role: "system",
-              content: "You are a helpful assistant that generates quiz questions. Always return valid JSON."
-            },
-            {
-              role: "user",
-              content: prompt
-            }
-          ],
-          max_tokens: 1024,
-          temperature: 0.7,
-        });
-        
-        const generatedText = response.choices[0]?.message?.content;
-        if (!generatedText) continue;
-        
-        // Extract JSON
-        const jsonMatch = generatedText.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const questions = JSON.parse(jsonMatch[0]);
-          if (Array.isArray(questions) && questions.length > 0) {
-            console.log(`[Quiz] Success with model: ${model}`);
-            return questions;
-          }
-        }
-      } else {
-        // Use textGeneration for other models
-        response = await hf.textGeneration({
-          model: model,
-          inputs: prompt,
-          parameters: {
-            max_new_tokens: 1024,
-            temperature: 0.7,
-            return_full_text: false
-          }
-        });
+Make questions test comprehension, include plausible distractors, and ensure the correct answer is clearly supported by the text.`;
 
-        const generatedText = (response as any).generated_text;
-        if (!generatedText) continue;
+  console.log(`[Quiz] Calling HuggingFace API with model: ${MODEL}`);
+  console.log(`[Quiz] Generating ${count} questions at ${difficulty} difficulty`);
 
-        const jsonMatch = generatedText.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const questions = JSON.parse(jsonMatch[0]);
-          if (Array.isArray(questions) && questions.length > 0) {
-            console.log(`[Quiz] Success with model: ${model}`);
-            return questions;
-          }
-        }
-      }
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      console.log(`[Quiz] Model ${model} failed:`, lastError.message);
-      continue;
+  const response = await hf.textGeneration({
+    model: MODEL,
+    inputs: prompt,
+    parameters: {
+      max_new_tokens: 1024,
+      temperature: 0.8,
+      return_full_text: false
     }
+  });
+
+  const generatedText = (response as any).generated_text;
+  if (!generatedText || typeof generatedText !== 'string') {
+    throw new Error("AI returned empty or invalid response");
   }
-  
-  throw lastError || new Error("All models failed to generate valid questions");
+
+  // Parse JSON from response
+  const jsonMatch = generatedText.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    throw new Error("Could not parse AI response as JSON");
+  }
+
+  try {
+    const questions = JSON.parse(jsonMatch[0]) as QuizQuestion[];
+    
+    // Validate each question
+    if (!Array.isArray(questions)) {
+      throw new Error("AI response is not an array");
+    }
+
+    for (const q of questions) {
+      if (!q.question || !Array.isArray(q.options) || typeof q.answer !== 'number') {
+        throw new Error("Invalid question structure in AI response");
+      }
+    }
+
+    console.log(`[Quiz] Successfully parsed ${questions.length} questions`);
+    return questions;
+  } catch (parseError) {
+    console.error("[Quiz] JSON parse error:", parseError);
+    throw new Error("Failed to parse AI response");
+  }
 }
 
-function generateFallbackQuiz(text: string, difficulty: string, count: number): QuizQuestion[] {
-  console.log("[Quiz] Using fallback generation");
-  
-  const questions: QuizQuestion[] = [];
-  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-  
-  for (let i = 0; i < Math.min(count, sentences.length); i++) {
-    const sentence = sentences[i].trim();
-    const words = sentence.split(' ').filter(w => w.length > 3);
-    
-    if (words.length < 2) continue;
-    
-    questions.push({
-      question: `What does the text say about "${words[0]} ${words[1]}"?`,
-      options: [
-        sentence.substring(0, 80),
-        "The opposite of what is stated",
-        "Information not mentioned in the text",
-        "None of the above"
-      ],
-      answer: 0,
-      explanation: `Based on the text: "${sentence.substring(0, 100)}..."`
-    });
-  }
-  
-  while (questions.length < count && questions.length < 5) {
-    questions.push({
-      question: "What is the main topic of this text?",
-      options: ["The subject matter discussed", "An unrelated topic", "A fictional story", "None of the above"],
-      answer: 0,
-      explanation: "The main topic is what the text primarily discusses."
-    });
-  }
-  
-  return questions.slice(0, count);
-}
-
+/**
+ * Sleep utility for retry delays
+ */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }

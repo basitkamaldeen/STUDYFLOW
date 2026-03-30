@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "../../context/AuthContext";
 import Card from "../components/Card";
 import PageHeader from "../components/PageHeader";
 import { Button } from "../components/ui/button";
@@ -17,7 +16,6 @@ interface Note {
 }
 
 export default function NotesPage() {
-  const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [notes, setNotes] = useState<Note[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -25,20 +23,10 @@ export default function NotesPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
 
-  // Redirect if not authenticated
+  // Fetch notes on mount
   useEffect(() => {
-    if (!authLoading && !user) {
-      console.log('[NotesPage] User not authenticated, redirecting to login');
-      router.push('/login');
-    }
-  }, [user, authLoading, router]);
-
-  // Fetch notes when user is authenticated
-  useEffect(() => {
-    if (user) {
-      fetchNotes();
-    }
-  }, [user]);
+    fetchNotes();
+  }, []);
 
   const fetchNotes = async () => {
     try {
@@ -49,11 +37,7 @@ export default function NotesPage() {
       setNotes(data.notes || []);
     } catch (error) {
       console.error("Failed to fetch notes:", error);
-      if (error instanceof Error && error.message.includes('401')) {
-        router.push('/login');
-      } else {
-        setNotes([]);
-      }
+      setNotes([]);
     } finally {
       setIsLoading(false);
     }
@@ -81,11 +65,7 @@ export default function NotesPage() {
       alert("Note created successfully!");
     } catch (error) {
       console.error("Create note error:", error);
-      if (error instanceof Error && error.message.includes('401')) {
-        router.push('/login');
-      } else {
-        alert("Failed to create note");
-      }
+      alert("Failed to create note");
     } finally {
       setIsCreating(false);
     }
@@ -103,36 +83,15 @@ export default function NotesPage() {
       alert("Note deleted successfully!");
     } catch (error) {
       console.error("Delete note error:", error);
-      if (error instanceof Error && error.message.includes('401')) {
-        router.push('/login');
-      } else {
-        alert("Failed to delete note");
-      }
+      alert("Failed to delete note");
     }
   };
-
-  // Show loading state while checking auth
-  if (authLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Redirect if not authenticated (this prevents flash of content)
-  if (!user) {
-    return null;
-  }
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
       <PageHeader
         title="My Notes"
-        description={`Create, view, and manage your study notes, ${user.username}.`}
+        description="Create, view, and manage your study notes"
       />
 
       {/* Create New Note */}
@@ -182,9 +141,7 @@ export default function NotesPage() {
         {isLoading ? (
           <div className="text-center py-8 text-gray-500">Loading notes...</div>
         ) : notes.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            No notes yet. Create your first note above!
-          </div>
+          <div className="text-center py-8 text-gray-500">No notes yet. Create one!</div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {notes.map((note) => (

@@ -3,26 +3,29 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
     "@huggingface/inference": "^4.13.10",
-    "@prisma/adapter-better-sqlite3": "^7.3.0",
-    "@prisma/client": "^7.3.0",
+    "@prisma/client": "^6.19.2",
     "@types/better-sqlite3": "^7.6.13",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
+    "jsonwebtoken": "^9.0.3",
     "natural": "^8.1.0",
     "next": "^16.1.6",
-    "prisma": "^7.3.0",
+    "prisma": "^6.19.2",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "stopword": "^3.1.5",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.0.3",
     "@types/react": "19.2.7",
     "@types/tesseract.js": "^0.0.2",
