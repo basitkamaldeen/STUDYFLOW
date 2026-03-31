@@ -12,10 +12,10 @@ const VALID_NOTE_TYPES = ['summary', 'quiz', 'flashcard', 'note', 'ocr'];
  */
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<{ note: Note } | APIErrorResponse>> {
   const requestId = crypto.randomUUID();
-  const { id } = params;
+  const { id } = await params; // Await the params Promise
   
   console.log(`[Notes-GET-${requestId}] Fetching note ${id}`);
 
@@ -62,10 +62,10 @@ export async function GET(
  */
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<{ note: Note } | APIErrorResponse>> {
   const requestId = crypto.randomUUID();
-  const { id } = params;
+  const { id } = await params; // Await the params Promise
   
   console.log(`[Notes-PUT-${requestId}] Updating note ${id}`);
 
@@ -174,10 +174,10 @@ export async function PUT(
  */
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<{ success: boolean } | APIErrorResponse>> {
   const requestId = crypto.randomUUID();
-  const { id } = params;
+  const { id } = await params; // Await the params Promise
   
   console.log(`[Notes-DELETE-${requestId}] Deleting note ${id}`);
 
