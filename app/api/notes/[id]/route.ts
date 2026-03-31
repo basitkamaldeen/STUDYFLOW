@@ -1,45 +1,45 @@
-// route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
 
-import { NextApiRequest, NextApiResponse } from 'next';
+// Handler Type for Note operations
+export type NoteHandlerResponse = Promise<{ id: string }>;  
 
-// GET handler for fetching note by ID
-export const getNoteById = async (req: NextApiRequest, res: NextApiResponse) => {
-    const { id } = req.query;
-    // Logic for getting a note from the database
-    const note = await fetchNoteFromDatabase(id);
-    if (!note) {
-        return res.status(404).json({ message: 'Note not found' });
+// GET method to retrieve a note by ID
+export async function GET(req: NextRequest, { params }: { params: { id: string } }): NoteHandlerResponse {
+    const { id } = params;
+    try {
+        const note = await prisma.note.findUnique({ where: { id } });
+        if (!note) {
+            return NextResponse.json({ message: 'Note not found' }, { status: 404 });
+        }
+        return NextResponse.json(note);
+    } catch (error) {
+        return NextResponse.json({ error: 'Error retrieving note' }, { status: 500 });
     }
-    return res.status(200).json(note);
-};
+}
 
-// PUT handler for updating a note by ID
-export const updateNoteById = async (req: NextApiRequest, res: NextApiResponse) => {
-    const { id } = req.query;
-    const noteData = req.body;
-    // Logic for updating a note in the database
-    const updatedNote = await updateNoteInDatabase(id, noteData);
-    return res.status(200).json(updatedNote);
-};
-
-// DELETE handler for deleting a note by ID
-export const deleteNoteById = async (req: NextApiRequest, res: NextApiResponse) => {
-    const { id } = req.query;
-    // Logic for deleting a note from the database
-    await deleteNoteFromDatabase(id);
-    return res.status(204).send('');
-};
-
-// Export the handlers for use in your Next.js API routes
-export default async (req: NextApiRequest, res: NextApiResponse) => {
-    switch (req.method) {
-        case 'GET':
-            return getNoteById(req, res);
-        case 'PUT':
-            return updateNoteById(req, res);
-        case 'DELETE':
-            return deleteNoteById(req, res);
-        default:
-            return res.status(405).json({ message: 'Method not allowed' });
+// PUT method to update a note by ID
+export async function PUT(req: NextRequest, { params }: { params: { id: string } }): NoteHandlerResponse {
+    const { id } = params;
+    const data = await req.json();
+    try {
+        const updatedNote = await prisma.note.update({
+            where: { id },
+            data,
+        });
+        return NextResponse.json(updatedNote);
+    } catch (error) {
+        return NextResponse.json({ error: 'Error updating note' }, { status: 500 });
     }
-};
+}
+
+// DELETE method to remove a note by ID
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }): NoteHandlerResponse {
+    const { id } = params;
+    try {
+        await prisma.note.delete({ where: { id } });
+        return NextResponse.json({ message: 'Note deleted successfully' });
+    } catch (error) {
+        return NextResponse.json({ error: 'Error deleting note' }, { status: 500 });
+    }
+}
