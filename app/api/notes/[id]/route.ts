@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { requireAuth } from '@/lib/auth';
-import type { APIErrorResponse, Note } from '@/types/api';
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { requireAuth } from "@/lib/auth";
+import type { APIErrorResponse, Note } from "@/types/api";
 
 const MAX_CONTENT_LENGTH = 100000;
 const MAX_TITLE_LENGTH = 200;
@@ -9,58 +9,197 @@ const VALID_NOTE_TYPES = ['summary', 'quiz', 'flashcard', 'note', 'ocr'];
 
 export async function GET(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> }
-): Promise<NextResponse> {
-  const { id } = await context.params;  // ← KEY: await params as Promise
-  
+  { params }: { params: Promise<{ id: string }> }
+): Promise<NextResponse<{ note: Note } | APIErrorResponse>> {
+  const { id } = await params;
+  const requestId = crypto.randomUUID();
+  console.log(`[Notes-GET-${requestId}] Fetching note ${id}`);
+
   try {
-    const userId = requireAuth(req);
-    const note = await prisma.note.findFirst({ where: { id, userId } });
+    const userId = await requireAuth(req);
+
+    const note = await prisma.note.findFirst({
+      where: { id, userId }
+    });
+
     if (!note) {
-      return NextResponse.json({ error: "Note not found", code: "NOT_FOUND" }, { status: 404 });
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Note not found", 
+        details: "The note doesn't exist or you don't have permission",
+        code: "NOT_FOUND"
+      }, { status: 404 });
     }
-    return NextResponse.json({ note });
+
+    const formattedNote: Note = {
+      id: note.id,
+      userId: note.userId,
+      type: note.type,
+      content: note.content,
+      originalText: note.originalText || undefined,
+      title: note.title,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt
+    };
+
+    return NextResponse.json({ note: formattedNote });
+
   } catch (error) {
-    return NextResponse.json({ error: "Internal server error", code: "INTERNAL_ERROR" }, { status: 500 });
+    console.error(`[Notes-GET-${requestId}] Error:`, error);
+    return NextResponse.json<APIErrorResponse>({ 
+      error: "Internal server error", 
+      details: error instanceof Error ? error.message : "Failed to fetch note",
+      code: "INTERNAL_ERROR"
+    }, { status: 500 });
   }
 }
 
 export async function PUT(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> }
-): Promise<NextResponse> {
-  const { id } = await context.params;  // ← KEY: await params as Promise
-  
+  { params }: { params: Promise<{ id: string }> }
+): Promise<NextResponse<{ note: Note } | APIErrorResponse>> {
+  const { id } = await params;
+  const requestId = crypto.randomUUID();
+  console.log(`[Notes-PUT-${requestId}] Updating note ${id}`);
+
   try {
-    const userId = requireAuth(req);
-    const payload = await req.json();
-    const { title, content, type } = payload;
-    
+    const userId = await requireAuth(req);
+
+    let payload: unknown;
+    try {
+      payload = await req.json();
+    } catch (parseError) {
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Invalid request body", 
+        details: "Request body must be valid JSON",
+        code: "INVALID_JSON"
+      }, { status: 400 });
+    }
+
+    const { title, content, type } = payload as { title?: string; content: string; type: string };
+
     if (!content || content.trim().length === 0) {
-      return NextResponse.json({ error: "Invalid content" }, { status: 400 });
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Invalid content", 
+        details: "Note content cannot be empty",
+        code: "EMPTY_CONTENT"
+      }, { status: 400 });
+    }
+
+    if (content.length > MAX_CONTENT_LENGTH) {
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Content too long", 
+        details: `Note content must be less than ${MAX_CONTENT_LENGTH} characters`,
+        code: "CONTENT_TOO_LONG"
+      }, { status: 400 });
+    }
+
+    if (!VALID_NOTE_TYPES.includes(type)) {
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Invalid note type", 
+        details: `Type must be one of: ${VALID_NOTE_TYPES.join(', ')}`,
+        code: "INVALID_TYPE"
+      }, { status: 400 });
+    }
+
+    const existingNote = await prisma.note.findFirst({
+      where: { id, userId }
+    });
+
+    if (!existingNote) {
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Note not found", 
+        details: "The note doesn't exist or you don't have permission",
+        code: "NOT_FOUND"
+      }, { status: 404 });
+    }
+
+    let finalTitle = title;
+    if (!finalTitle || finalTitle.trim().length === 0) {
+      const words = content.split(/\s+/).slice(0, 5);
+      finalTitle = `${type.charAt(0).toUpperCase() + type.slice(1)}: ${words.join(' ')}${words.length < content.split(/\s+/).length ? '...' : ''}`;
+    }
+
+    if (finalTitle.length > MAX_TITLE_LENGTH) {
+      finalTitle = finalTitle.substring(0, MAX_TITLE_LENGTH - 3) + '...';
     }
 
     const updatedNote = await prisma.note.update({
       where: { id },
-      data: { title, content, type }
+      data: {
+        title: finalTitle,
+        content,
+        type
+      }
     });
-    return NextResponse.json({ note: updatedNote });
+
+    console.log(`[Notes-PUT-${requestId}] Updated note ${id}`);
+
+    const formattedNote: Note = {
+      id: updatedNote.id,
+      userId: updatedNote.userId,
+      type: updatedNote.type,
+      content: updatedNote.content,
+      originalText: updatedNote.originalText || undefined,
+      title: updatedNote.title,
+      createdAt: updatedNote.createdAt,
+      updatedAt: updatedNote.updatedAt
+    };
+
+    return NextResponse.json({ note: formattedNote });
+
   } catch (error) {
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error(`[Notes-PUT-${requestId}] Error:`, error);
+    return NextResponse.json<APIErrorResponse>({ 
+      error: "Internal server error", 
+      details: error instanceof Error ? error.message : "Failed to update note",
+      code: "INTERNAL_ERROR"
+    }, { status: 500 });
   }
 }
 
 export async function DELETE(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> }
-): Promise<NextResponse> {
-  const { id } = await context.params;  // ← KEY: await params as Promise
-  
+  { params }: { params: Promise<{ id: string }> }
+): Promise<NextResponse<{ success: boolean } | APIErrorResponse>> {
+  const { id } = await params;
+  const requestId = crypto.randomUUID();
+  console.log(`[Notes-DELETE-${requestId}] Deleting note ${id}`);
+
   try {
-    const userId = requireAuth(req);
+    const userId = await requireAuth(req);
+
+    if (!id || typeof id !== 'string') {
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Invalid note ID", 
+        details: "Note ID is required",
+        code: "INVALID_ID"
+      }, { status: 400 });
+    }
+
+    const existingNote = await prisma.note.findFirst({
+      where: { id, userId }
+    });
+
+    if (!existingNote) {
+      return NextResponse.json<APIErrorResponse>({ 
+        error: "Note not found", 
+        details: "The note doesn't exist or you don't have permission",
+        code: "NOT_FOUND"
+      }, { status: 404 });
+    }
+
     await prisma.note.delete({ where: { id } });
+
+    console.log(`[Notes-DELETE-${requestId}] Deleted note ${id}`);
+
     return NextResponse.json({ success: true });
+
   } catch (error) {
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error(`[Notes-DELETE-${requestId}] Error:`, error);
+    return NextResponse.json<APIErrorResponse>({ 
+      error: "Internal server error", 
+      details: error instanceof Error ? error.message : "Failed to delete note",
+      code: "INTERNAL_ERROR"
+    }, { status: 500 });
   }
 }
