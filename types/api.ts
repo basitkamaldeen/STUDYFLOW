@@ -101,6 +101,7 @@ export interface QuizRequest {
 export interface FlashcardsRequest {
   text: string;
   count?: number;
+  saveToNotes?: boolean; 
 }
 
 export interface NoteCreateRequest {
