@@ -96,7 +96,7 @@ export async function POST(req: Request): Promise<NextResponse<FlashcardsRespons
     let userId: string | null = null;
     if (saveToNotes) {
       try {
-        userId = getCurrentUserId(req as any);
+        userId = await getCurrentUserId(req as any);
       } catch {
         console.warn(`[Flashcards-${requestId}] User not authenticated, skipping save`);
       }
