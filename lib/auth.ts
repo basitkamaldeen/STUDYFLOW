@@ -66,8 +66,8 @@ export async function getCurrentUserId(req?: any): Promise<string | null> {
 }
 
 // Authenticate middleware for API routes
-export function requireAuth(req?: any): string {
-  const userId = getCurrentUserId(req);
+export async function requireAuth(req?: any): Promise<string> {
+  const userId = await getCurrentUserId(req);
   if (!userId) {
     throw new Error('Unauthorized');
   }
