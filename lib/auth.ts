@@ -41,7 +41,7 @@ export function verifyToken(token: string): UserPayload | null {
 }
 
 // Get current user from cookies (for API routes)
-export function getCurrentUser(req?: any): UserPayload | null {
+export async function getCurrentUser(req?: any): Promise<UserPayload | null> {
   try {
     let token: string | undefined;
     
@@ -49,7 +49,7 @@ export function getCurrentUser(req?: any): UserPayload | null {
       token = req.cookies.get('token')?.value;
     } else if (typeof window === 'undefined') {
       // Server component
-      const cookieStore = cookies();
+      const cookieStore = await cookies();
       token = cookieStore.get('token')?.value;
     }
     
@@ -59,10 +59,9 @@ export function getCurrentUser(req?: any): UserPayload | null {
     return null;
   }
 }
-
 // Get user ID (for API routes)
-export function getCurrentUserId(req?: any): string | null {
-  const user = getCurrentUser(req);
+export async function getCurrentUserId(req?: any): Promise<string | null> {
+  const user = await getCurrentUser(req);
   return user?.id || null;
 }
 
