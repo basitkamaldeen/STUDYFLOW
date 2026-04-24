@@ -19,7 +19,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<NotesListRespo
     // Get authenticated user ID
     let userId: string;
     try {
-      userId = requireAuth(req);
+      userId = await requireAuth(req);
       console.log(`[Notes-GET-${requestId}] Authenticated user: ${userId}`);
     } catch (authError) {
       console.warn(`[Notes-GET-${requestId}] Authentication failed`);
