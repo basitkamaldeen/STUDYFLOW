@@ -173,8 +173,7 @@ export async function POST(req: Request): Promise<NextResponse<FlashcardsRespons
     }
 
     return NextResponse.json<FlashcardsResponse>({
-      cards: validatedCards,
-      flashcards: validatedCards,
+      cards: validatedCards,      
       metadata: {
         requestedCount: count,
         actualCount: validatedCards.length,
