@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { HfInference } from "@huggingface/inference";
 import { prisma } from "../../../lib/prisma";
-import { getCurrentUser } from "../../../lib/auth";
+import { getCurrentUserId } from "../../../lib/auth";
 import type { FlashcardsResponse, FlashcardsRequest, Flashcard, APIErrorResponse } from "../../../types/api";
 
 export const runtime = "nodejs";
@@ -96,7 +96,7 @@ export async function POST(req: Request): Promise<NextResponse<FlashcardsRespons
     let userId: string | null = null;
     if (saveToNotes) {
       try {
-        userId = getCurrentUser(req as any);
+        userId = getCurrentUserId(req as any);
       } catch {
         console.warn(`[Flashcards-${requestId}] User not authenticated, skipping save`);
       }
