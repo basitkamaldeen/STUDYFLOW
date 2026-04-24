@@ -97,7 +97,7 @@ export async function POST(req: Request): Promise<NextResponse<QuizResponse | AP
     let userId: string | null = null;
     if (saveToNotes) {
       try {
-        userId = getCurrentUserId(req as any);
+        userId = await getCurrentUserId(req as any);
       } catch {
         console.warn(`[Quiz-${requestId}] User not authenticated, skipping save`);
       }
