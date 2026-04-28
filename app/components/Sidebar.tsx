@@ -46,14 +46,7 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="absolute bottom-8 left-6 right-6">
-        <div className="bg-gradient-to-r from-indigo-100 to-purple-100 rounded-xl p-4 border border-indigo-200">
-          <h3 className="font-semibold text-sm text-indigo-900 mb-1">Pro Tip</h3>
-          <p className="text-xs text-indigo-700">
-            Upload multiple files at once to process them in batch mode!
-          </p>
-        </div>
-      </div>
+      {/* Pro Tip banner removed */}
     </aside>
   );
 }

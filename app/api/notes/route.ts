@@ -73,7 +73,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<NoteCreateRes
     // Get authenticated user ID
     let userId: string;
     try {
-      userId = requireAuth(req);
+      userId = await requireAuth(req);
       console.log(`[Notes-POST-${requestId}] Authenticated user: ${userId}`);
     } catch (authError) {
       console.warn(`[Notes-POST-${requestId}] Authentication failed`);
